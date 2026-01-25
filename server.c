@@ -56,10 +56,23 @@ int main() {
 
         char buffer[BUFFER_SIZE] = {0};
         read(new_socket, buffer, BUFFER_SIZE);
-        printf("Request: \n%s\n", buffer);
 
-        // index.html 파일 열기
-        FILE *file = fopen("index.html", "r");
+        char method[10], path[100], protocol[10];
+        // 첫 줄에서 "GET", "/index.html", "HTTP/1.1"을 분리해서 저장
+        sscanf(buffer, "%s %s %s", method, path, protocol);
+        printf("User requested: %s\n", path);
+
+        // 파일 이름 결정 (기본값은 index.html)
+        char file_name[110];
+        if (strcmp(path, "/") == 0) {
+            strcpy(file_name, "index.html");
+        } else {
+            // 경로의 앞 글자 '/'를 파일 이름에서 제외
+            strcpy(file_name, path + 1);
+        }
+
+        // 결정된 file_name으로 파일 열기
+        FILE *file = fopen(file_name, "r");
         
         if (file == NULL) {
             printf("Error: File not found\n");

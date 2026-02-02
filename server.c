@@ -55,11 +55,19 @@ int main() {
         }
 
         char buffer[BUFFER_SIZE] = {0};
-        read(new_socket, buffer, BUFFER_SIZE);
+        int valread = read(new_socket, buffer, BUFFER_SIZE);
+        
+        if(valread <= 0) {
+            close(new_socket);
+            continue;
+        }
 
         char method[10], path[100], protocol[10];
         // 첫 줄에서 "GET", "/index.html", "HTTP/1.1"을 분리해서 저장
-        sscanf(buffer, "%s %s %s", method, path, protocol);
+        if (sscanf(buffer, "%s %s %s", method, path, protocol) < 3) {
+            close(new_socket);
+            continue;
+        }
         printf("User requested: %s\n", path);
 
         // 파일 이름 결정 (기본값은 index.html)
@@ -72,26 +80,32 @@ int main() {
         }
 
         // 결정된 file_name으로 파일 열기
-        FILE *file = fopen(file_name, "r");
+        FILE *file = fopen(file_name, "rb");
         
         if (file == NULL) {
-            printf("Error: File not found\n");
-            char *err_msg = "HTTP/1.1 404 Not Found\r\n\r\nFile Not Found";
+            printf(">> [Error] File not found: %s\n", file_name);
+            char *err_msg = "HTTP/1.1 404 Not Found\r\nContent-Type: text/plain\r\nContent-Length: 14\r\n\r\nFile Not Found";
             send(new_socket, err_msg, strlen(err_msg), 0);
         } else {
+            // 확장자 구분하여 헤더 설정
+            char *content_type = "text/html";
+            if(strstr(file_name, ".jpg") || strstr(file_name, ".jpeg")) content_type = "image/jpeg";
+            else if(strstr(file_name, ".png")) content_type = "image/png";
+
             // 헤더 전송
-            char *header = "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=UTF-8\r\n\r\n";
+            char header[256];
+            sprintf(header, "HTTP/1.1 200 OK\r\nContent-Type: %s; charset=UTF-8\r\n\r\n", content_type);
             send(new_socket, header, strlen(header), 0);
 
-            // 파일 내용 전송
-            char file_buf[BUFFER_SIZE];
-
-            while (fgets(file_buf, BUFFER_SIZE, file) != NULL) {
-                send(new_socket, file_buf, strlen(file_buf), 0);
+            // 파일 내용 전송 (텍스트/이미지 모두 전송)
+            unsigned char file_buf[BUFFER_SIZE];
+            int bytes_read;
+            while ((bytes_read = fread(file_buf, 1, BUFFER_SIZE, file)) > 0) {
+                send(new_socket, file_buf, bytes_read, 0);
             }
             
             fclose(file);
-            printf(">> File sent successfully!\n");
+            printf(">> [Success] Sent: %s as %s\n", file_name, content_type);
         }
 
         close(new_socket);

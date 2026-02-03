@@ -4,6 +4,7 @@
 #include <unistd.h>
 #include <arpa/inet.h>
 #include <sys/socket.h>
+#include <sqlite3.h>
 
 #define PORT 8080
 #define BUFFER_SIZE 1024
@@ -77,6 +78,99 @@ int main() {
         } else {
             // 경로의 앞 글자 '/'를 파일 이름에서 제외
             strcpy(file_name, path + 1);
+        }
+
+        // 경로가 /users 일 때 DB 조회
+        if(strcmp(path, "/users") == 0) {
+            sqlite3 *db;
+            sqlite3_stmt *res;
+
+            // 1. DB 열기
+            if(sqlite3_open("test.db", &db) != SQLITE_OK) {
+                char *err_msg = "HTTP/1.1 500 Internal Server Error\r\n\r\nDB Error";
+                send(new_socket, err_msg, strlen(err_msg), 0);
+            } else {
+                // 2. HTML 헤더 먼저 전송
+                char *header = "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=UTF-8\r\n\r\n";
+                send(new_socket, header, strlen(header), 0);
+
+                // 3. HTML 본문 조립 시작
+                char body[2048] = "<html><body><h1>User List (from DB)</h1><ul>";
+
+                // 4. DB 데이터 조회 (SELECT)
+                char *sql = "SELECT Name FROM Users";
+                sqlite3_prepare_v2(db, sql, -1, &res, 0);
+
+                while(sqlite3_step(res) == SQLITE_ROW) {
+                    const char* name = (const char *)sqlite3_column_text(res, 0);
+                    strcat(body, "<li>");
+                    strcat(body, name);
+
+                    //삭제 버튼 추가
+                    strcat(body, "  <a href='/delete_user?name=");
+                    strcat(body, name);
+                    strcat(body, "' style='color:red; font-size:0.8em;'>[삭제]</a>");
+                    strcat(body, "<li>");
+                }
+
+                strcat(body, "</ul><a href='/'>Back to Home</a></body></html>");
+
+                // 5. 최종 결과 전송
+                send(new_socket, body, strlen(body), 0);
+
+                sqlite3_finalize(res);
+                sqlite3_close(db);
+            }
+
+            close(new_socket);
+            continue;
+        }
+
+        if (strncmp(path, "/add_user", 9) == 0) {
+            // 1. URL에서 이름(name) 추출하기 (예: /add_user?name=user1)
+            char *name_ptr = strstr(path, "name=");
+            if (name_ptr != NULL) {
+                name_ptr += 5; // "name=" 이후의 입력된 실제 이름 시작 지점
+        
+                sqlite3 *db;
+                if (sqlite3_open("test.db", &db) == SQLITE_OK) {
+                    char sql[256];
+                    // 2. DB에 삽입 (INSERT)
+                    sprintf(sql, "INSERT INTO Users (Name) VALUES ('%s');", name_ptr);
+                    sqlite3_exec(db, sql, 0, 0, 0);
+                    sqlite3_close(db);
+                    printf(">> [DB Success] Added user: %s\n", name_ptr);
+                }
+            }
+
+            // 3. 등록 후 다시 목록 페이지로 리다이렉트
+            char *msg = "HTTP/1.1 303 See Other\r\nLocation: /users\r\n\r\n";
+            send(new_socket, msg, strlen(msg), 0);
+            close(new_socket);
+            continue;
+        }
+
+        if (strncmp(path, "/delete_user", 12) == 0) {
+            char *name_ptr = strstr(path, "name=");
+            if (name_ptr != NULL) {
+                name_ptr += 5;
+        
+                sqlite3 *db;
+                if (sqlite3_open("test.db", &db) == SQLITE_OK) {
+                    char sql[256];
+                    // SQL 삭제 명령 (DELETE)
+                    sprintf(sql, "DELETE FROM Users WHERE Name = '%s';", name_ptr);
+                    sqlite3_exec(db, sql, 0, 0, 0);
+                    sqlite3_close(db);
+                    printf(">> [DB Success] Deleted user: %s\n", name_ptr);
+                }
+            }
+
+            // 삭제 후 다시 목록 페이지로 리다이렉트
+            char *msg = "HTTP/1.1 303 See Other\r\nLocation: /users\r\n\r\n";
+            send(new_socket, msg, strlen(msg), 0);
+            close(new_socket);
+            continue;
         }
 
         // 결정된 file_name으로 파일 열기
